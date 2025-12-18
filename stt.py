@@ -12,6 +12,8 @@ import threading
 import subprocess
 import atexit
 import fcntl
+from enum import Enum
+from typing import Callable, Optional
 
 print("Starting STT...", end="", flush=True)
 
@@ -27,8 +29,16 @@ from pynput import keyboard
 import requests
 
 from providers import get_provider
+from menubar import STTMenuBar
 
 print(" ready.", flush=True)
+
+
+class AppState(Enum):
+    """Application state for menu bar icon"""
+    IDLE = "idle"
+    RECORDING = "recording"
+    TRANSCRIBING = "transcribing"
 
 
 def check_for_updates():
@@ -412,6 +422,20 @@ class STTApp:
         self.stream = None
         self.device = device
         self.provider = provider or get_provider(PROVIDER)
+
+        # State management for menu bar
+        self._state = AppState.IDLE
+        self._state_callback: Optional[Callable[[AppState], None]] = None
+
+    def set_state_callback(self, callback: Callable[[AppState], None]):
+        """Register callback for state changes (called from any thread)"""
+        self._state_callback = callback
+
+    def _set_state(self, new_state: AppState):
+        """Update state and notify callback"""
+        self._state = new_state
+        if self._state_callback:
+            self._state_callback(new_state)
         
     def start_recording(self):
         """Start recording audio from microphone"""
@@ -419,6 +443,7 @@ class STTApp:
             return
 
         self.recording = True
+        self._set_state(AppState.RECORDING)
         self.audio_data = []
         play_sound(SOUND_START)
         print("🎤 Recording...")
@@ -465,6 +490,7 @@ class STTApp:
             return
 
         self.recording = False
+        self._set_state(AppState.IDLE)
         play_sound(SOUND_CANCEL)
         print("❌ Recording cancelled")
 
@@ -536,7 +562,9 @@ class STTApp:
 
         if audio is None or len(audio) < SAMPLE_RATE * 0.5:  # Less than 0.5 seconds
             print("⚠️  Recording too short, skipping...")
+            self._set_state(AppState.IDLE)
         else:
+            self._set_state(AppState.TRANSCRIBING)
             # Save to temp file
             wav_path = self.save_audio_to_wav(audio)
 
@@ -555,6 +583,7 @@ class STTApp:
             finally:
                 # Clean up temp file
                 os.unlink(wav_path)
+                self._set_state(AppState.IDLE)
 
         self.print_ready_prompt()
 
@@ -662,10 +691,34 @@ def main():
                 send_enter_flag = False
                 # Process in a separate thread to not block the listener
                 threading.Thread(target=app.process_recording, args=(send_enter,)).start()
-    
-    # Start the keyboard listener
-    with keyboard.Listener(on_press=on_press, on_release=on_release) as listener:
-        listener.join()
+
+    # Start the keyboard listener in a background thread
+    listener = keyboard.Listener(on_press=on_press, on_release=on_release)
+    listener.start()
+
+    # Cleanup handler
+    def cleanup():
+        listener.stop()
+
+    atexit.register(cleanup)
+
+    # Callbacks for menu bar
+    def on_sound_toggle(enabled):
+        global SOUND_ENABLED
+        SOUND_ENABLED = enabled
+        save_config("SOUND_ENABLED", str(enabled).lower())
+
+    # Create and run menu bar (blocks on main thread)
+    menubar = STTMenuBar(
+        stt_app=app,
+        hotkey_name=hotkey_name,
+        provider_name=provider.name,
+        sound_enabled=SOUND_ENABLED,
+        config_file=CONFIG_FILE,
+        on_sound_toggle=on_sound_toggle,
+        on_quit=cleanup,
+    )
+    menubar.run()
 
 
 if __name__ == "__main__":
