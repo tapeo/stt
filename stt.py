@@ -301,11 +301,10 @@ def setup_wizard():
     print(f"\nContext prompt helps recognize specific terms (e.g., Claude, TypeScript, React)")
     current = f" [{default_prompt}]" if default_prompt else ""
     prompt = input(f"Prompt{current}: ").strip()
-    if prompt != default_prompt:
+    if prompt and prompt != default_prompt:
         save_config("PROMPT", prompt)
         PROMPT = prompt
-        if prompt:
-            print(f"Prompt set")
+        print(f"Prompt set")
 
     # Sound
     default_sound = "y" if SOUND_ENABLED else "n"
