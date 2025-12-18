@@ -422,6 +422,10 @@ class STTApp:
         self.device = device
         self.provider = provider or get_provider(PROVIDER)
 
+        # Thread synchronization
+        self._lock = threading.Lock()
+        self._processing = False  # Guard against concurrent process_recording calls
+
         # State management for menu bar
         self._state = AppState.IDLE
         self._state_callback: Optional[Callable[[AppState], None]] = None
@@ -438,67 +442,93 @@ class STTApp:
         
     def start_recording(self):
         """Start recording audio from microphone"""
-        if self.recording:
-            return
+        with self._lock:
+            if self.recording:
+                return
+            self.recording = True
+            self.audio_data = []
 
-        self.recording = True
         self._set_state(AppState.RECORDING)
-        self.audio_data = []
         play_sound(SOUND_START)
         print("🎤 Recording...")
-        
+
         def callback(indata, frames, time, status):
             if status:
                 print(f"Status: {status}")
+            # Lock-free check is safe here - worst case we miss one chunk
             if self.recording:
                 self.audio_data.append(indata.copy())
-        
-        self.stream = sd.InputStream(
-            device=self.device,
-            samplerate=SAMPLE_RATE,
-            channels=CHANNELS,
-            dtype=np.float32,
-            callback=callback
-        )
-        self.stream.start()
+
+        try:
+            stream = sd.InputStream(
+                device=self.device,
+                samplerate=SAMPLE_RATE,
+                channels=CHANNELS,
+                dtype=np.float32,
+                callback=callback
+            )
+            stream.start()
+            with self._lock:
+                if self.recording:
+                    self.stream = stream
+                else:
+                    # Recording was cancelled while starting
+                    stream.stop()
+                    stream.close()
+        except Exception as e:
+            print(f"❌ Failed to start recording: {e}")
+            with self._lock:
+                self.recording = False
+            self._set_state(AppState.IDLE)
     
     def stop_recording(self):
         """Stop recording and return audio data"""
-        if not self.recording:
-            return None
+        with self._lock:
+            if not self.recording:
+                return None
+            self.recording = False
+            stream = self.stream
+            self.stream = None
+            audio_data = self.audio_data
+            self.audio_data = []
 
-        self.recording = False
         play_sound(SOUND_STOP)
         print("⏹️  Stopped recording")
-        
-        if self.stream:
-            self.stream.stop()
-            self.stream.close()
-            self.stream = None
-        
-        if not self.audio_data:
+
+        # Stop stream outside lock to avoid deadlock with audio callback
+        if stream:
+            try:
+                stream.stop()
+                stream.close()
+            except Exception as e:
+                print(f"⚠️  Error closing stream: {e}")
+
+        if not audio_data:
             return None
-            
+
         # Concatenate all audio chunks
-        audio = np.concatenate(self.audio_data, axis=0)
-        return audio
+        return np.concatenate(audio_data, axis=0)
 
     def cancel_recording(self):
         """Cancel recording without processing"""
-        if not self.recording:
-            return
+        with self._lock:
+            if not self.recording:
+                return
+            self.recording = False
+            stream = self.stream
+            self.stream = None
+            self.audio_data = []
 
-        self.recording = False
         self._set_state(AppState.IDLE)
         play_sound(SOUND_CANCEL)
         print("❌ Recording cancelled")
 
-        if self.stream:
-            self.stream.stop()
-            self.stream.close()
-            self.stream = None
-
-        self.audio_data = []
+        if stream:
+            try:
+                stream.stop()
+                stream.close()
+            except Exception as e:
+                print(f"⚠️  Error closing stream: {e}")
 
     def save_audio_to_wav(self, audio_data):
         """Save audio data to a temporary WAV file"""
@@ -557,34 +587,39 @@ class STTApp:
     
     def process_recording(self, send_enter=False):
         """Process the recorded audio: transcribe and type"""
-        audio = self.stop_recording()
+        # Guard against concurrent processing calls
+        with self._lock:
+            if self._processing:
+                return
+            self._processing = True
 
-        if audio is None or len(audio) < SAMPLE_RATE * 0.5:  # Less than 0.5 seconds
-            print("⚠️  Recording too short, skipping...")
-            self._set_state(AppState.IDLE)
-        else:
-            self._set_state(AppState.TRANSCRIBING)
-            # Save to temp file
-            wav_path = self.save_audio_to_wav(audio)
+        try:
+            audio = self.stop_recording()
 
-            try:
-                # Transcribe
-                text = self.transcribe_audio(wav_path)
-
-                if text:
-                    # Process text transformations
-                    text = self.transform_text(text)
-                    # Type the result
-                    self.type_text(text, send_enter=send_enter)
-                    print(f"✅ Done: {text}")
-                else:
-                    print("⚠️  No transcription returned")
-            finally:
-                # Clean up temp file
-                os.unlink(wav_path)
+            if audio is None or len(audio) < SAMPLE_RATE * 0.5:  # Less than 0.5 seconds
+                print("⚠️  Recording too short, skipping...")
                 self._set_state(AppState.IDLE)
+            else:
+                self._set_state(AppState.TRANSCRIBING)
+                wav_path = self.save_audio_to_wav(audio)
 
-        self.print_ready_prompt()
+                try:
+                    text = self.transcribe_audio(wav_path)
+
+                    if text:
+                        text = self.transform_text(text)
+                        self.type_text(text, send_enter=send_enter)
+                        print(f"✅ Done: {text}")
+                    else:
+                        print("⚠️  No transcription returned")
+                finally:
+                    os.unlink(wav_path)
+                    self._set_state(AppState.IDLE)
+
+            self.print_ready_prompt()
+        finally:
+            with self._lock:
+                self._processing = False
 
 
 def main():
