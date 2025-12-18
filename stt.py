@@ -425,6 +425,7 @@ class STTApp:
         # Thread synchronization
         self._lock = threading.Lock()
         self._processing = False  # Guard against concurrent process_recording calls
+        self._starting = False  # Guard against concurrent start_recording calls
 
         # State management for menu bar
         self._state = AppState.IDLE
@@ -443,8 +444,9 @@ class STTApp:
     def start_recording(self):
         """Start recording audio from microphone"""
         with self._lock:
-            if self.recording:
+            if self.recording or self._starting:
                 return
+            self._starting = True
             self.recording = True
             self.audio_data = []
 
@@ -480,6 +482,9 @@ class STTApp:
             with self._lock:
                 self.recording = False
             self._set_state(AppState.IDLE)
+        finally:
+            with self._lock:
+                self._starting = False
     
     def stop_recording(self):
         """Stop recording and return audio data"""
@@ -513,6 +518,9 @@ class STTApp:
         """Cancel recording without processing"""
         with self._lock:
             if not self.recording:
+                # Even if not recording, ensure state is IDLE (fallback safeguard)
+                if self._state == AppState.RECORDING:
+                    self._set_state(AppState.IDLE)
                 return
             self.recording = False
             stream = self.stream
@@ -593,31 +601,37 @@ class STTApp:
                 return
             self._processing = True
 
+        wav_path = None
         try:
             audio = self.stop_recording()
 
             if audio is None or len(audio) < SAMPLE_RATE * 0.5:  # Less than 0.5 seconds
                 print("⚠️  Recording too short, skipping...")
-                self._set_state(AppState.IDLE)
             else:
                 self._set_state(AppState.TRANSCRIBING)
                 wav_path = self.save_audio_to_wav(audio)
 
-                try:
-                    text = self.transcribe_audio(wav_path)
+                text = self.transcribe_audio(wav_path)
 
-                    if text:
-                        text = self.transform_text(text)
-                        self.type_text(text, send_enter=send_enter)
-                        print(f"✅ Done: {text}")
-                    else:
-                        print("⚠️  No transcription returned")
-                finally:
-                    os.unlink(wav_path)
-                    self._set_state(AppState.IDLE)
+                if text:
+                    text = self.transform_text(text)
+                    self.type_text(text, send_enter=send_enter)
+                    print(f"✅ Done: {text}")
+                else:
+                    print("⚠️  No transcription returned")
 
             self.print_ready_prompt()
+        except Exception as e:
+            print(f"❌ Error processing recording: {e}")
         finally:
+            # Always clean up temp file if created
+            if wav_path:
+                try:
+                    os.unlink(wav_path)
+                except OSError:
+                    pass
+            # Always reset state to IDLE
+            self._set_state(AppState.IDLE)
             with self._lock:
                 self._processing = False
 
@@ -706,12 +720,14 @@ def main():
                 key_pressed = True
                 # Check if shift is already held when starting
                 send_enter_flag = shift_held
-                app.start_recording()
+                # Start recording in background thread to avoid blocking keyboard listener
+                threading.Thread(target=app.start_recording, daemon=True).start()
         elif key == keyboard.Key.esc:
             if app.recording:
                 key_pressed = False
                 send_enter_flag = False
-                app.cancel_recording()
+                # Cancel recording in background thread to avoid blocking keyboard listener
+                threading.Thread(target=app.cancel_recording, daemon=True).start()
 
     def on_release(key):
         nonlocal key_pressed, shift_held, send_enter_flag
