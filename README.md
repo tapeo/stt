@@ -102,7 +102,8 @@ On first run, the model (~2.5GB) will be downloaded and cached.
 
 **Limitations:**
 - English only
-- No prompt support (PROMPT setting is ignored)
+
+**Phonetic correction:** While Parakeet doesn't support Whisper-style prompts, it uses the `PROMPT` setting for phonetic post-processing. Terms like `Claude Code, WezTerm` will correct sound-alike ASR errors (e.g., "cloud code" → "Claude Code", "Vez term" → "WezTerm").
 
 ### Cloud Mode (Groq)
 

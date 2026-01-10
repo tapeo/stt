@@ -650,7 +650,16 @@ class ParakeetProvider(TranscriptionProvider):
             error = result.get("error")
             if error:
                 raise RuntimeError(str(error))
-            return str(result.get("text") or "").strip()
+            text = str(result.get("text") or "").strip()
+
+            # Apply phonetic correction using PROMPT vocabulary
+            if prompt and text:
+                from postprocess import parse_vocabulary, correct_text
+                vocab = parse_vocabulary(prompt)
+                if vocab:
+                    text = correct_text(text, vocab)
+
+            return text
         except TimeoutError:
             print("❌ Parakeet transcription timed out. Restarting worker...")
             self._stop_worker(force=True)
