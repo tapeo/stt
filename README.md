@@ -32,7 +32,7 @@ On first run, a setup wizard will guide you through configuration.
 To update:
 
 ```bash
-uv tool upgrade stt
+uv tool install --reinstall git+https://github.com/bokan/stt.git
 ```
 
 ## Permissions
@@ -53,7 +53,7 @@ stt
 | Action | Keys |
 |--------|------|
 | Record | Hold **Right Command** (default) |
-| Record + Enter | Hold **Left Shift** while recording |
+| Record + Enter | Hold **Shift** while recording |
 | Cancel recording / stuck transcription | **ESC** |
 | Quit | **Ctrl+C** |
 
