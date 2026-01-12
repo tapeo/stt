@@ -645,7 +645,7 @@ class _AudioWorkerClient:
             if last_error:
                 raise last_error
 
-    def stop_recording(self, *, wav_path: str) -> int:
+    def stop_recording(self, *, wav_path: str) -> tuple[int, float]:
         with self._lock:
             self._ensure_running_locked()
             req_id = self._next_id
@@ -666,10 +666,11 @@ class _AudioWorkerClient:
                 raise RuntimeError(message.get("error") or "Failed to stop recording")
 
             frames = message.get("frames")
+            peak = message.get("peak")
             try:
-                return int(frames or 0)
+                return int(frames or 0), float(peak or 0.0)
             except (TypeError, ValueError):
-                return 0
+                return 0, 0.0
 
     def cancel_recording(self) -> None:
         with self._lock:
@@ -966,10 +967,10 @@ class STTApp:
                 self._starting = False
     
     def stop_recording(self):
-        """Stop recording and return (wav_path, frames)"""
+        """Stop recording and return (wav_path, frames, rms)"""
         with self._lock:
             if not self.recording:
-                return None, 0
+                return None, 0, 0.0
             self.recording = False
             starting = self._starting
 
@@ -988,8 +989,8 @@ class STTApp:
         fd, wav_path = tempfile.mkstemp(suffix=".wav")
         os.close(fd)
         try:
-            frames = self._audio_worker.stop_recording(wav_path=wav_path)
-            return wav_path, frames
+            frames, rms = self._audio_worker.stop_recording(wav_path=wav_path)
+            return wav_path, frames, rms
         except TimeoutError:
             print("❌ Audio recording stop timed out. Restarting audio worker...")
             self._audio_worker.stop(force=True)
@@ -997,7 +998,7 @@ class STTApp:
                 os.unlink(wav_path)
             except OSError:
                 pass
-            return None, 0
+            return None, 0, 0.0
         except Exception as e:
             print(f"❌ Failed to stop recording: {e}")
             self._audio_worker.stop(force=True)
@@ -1005,7 +1006,7 @@ class STTApp:
                 os.unlink(wav_path)
             except OSError:
                 pass
-            return None, 0
+            return None, 0, 0.0
 
     def cancel_recording(self):
         """Cancel recording without processing"""
@@ -1136,12 +1137,14 @@ class STTApp:
 
         wav_path = None
         try:
-            wav_path, frames = self.stop_recording()
+            wav_path, frames, peak = self.stop_recording()
 
             if not wav_path:
                 print("⚠️  No audio captured, skipping...")
             elif frames < int(SAMPLE_RATE * 0.5):  # Less than 0.5 seconds
                 print("⚠️  Recording too short, skipping...")
+            elif peak < 0.02:  # Silence threshold (no peaks above noise floor)
+                print("⚠️  Audio too quiet (silence), skipping...")
             else:
                 self._set_state(AppState.TRANSCRIBING)
                 text = self.transcribe_audio(wav_path)

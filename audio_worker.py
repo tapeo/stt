@@ -126,9 +126,9 @@ class Recorder:
 
         _write_json({"type": "waveform", "values": values})
 
-    def stop(self, *, wav_path: str) -> int:
+    def stop(self, *, wav_path: str) -> tuple[int, float]:
         if not self._recording:
-            return 0
+            return 0, 0.0
 
         self._recording = False
         stream = self._stream
@@ -144,17 +144,18 @@ class Recorder:
                 _log(traceback.format_exc())
 
         if not chunks:
-            return 0
+            return 0, 0.0
 
         import numpy as np
         from scipy.io import wavfile
 
         audio = np.concatenate(chunks, axis=0)
         frames = int(audio.shape[0])
+        peak = float(np.max(np.abs(audio)))
 
         audio_int16 = (audio * 32767).astype(np.int16)
         wavfile.write(wav_path, int(self._sample_rate or 16000), audio_int16)
-        return frames
+        return frames, peak
 
     def cancel(self) -> None:
         self._recording = False
@@ -210,8 +211,8 @@ def main() -> int:
                 wav_path = message.get("wav_path")
                 if not wav_path:
                     raise ValueError("Missing wav_path")
-                frames = recorder.stop(wav_path=str(wav_path))
-                _write_json({"type": "stopped", "id": req_id, "wav_path": wav_path, "frames": frames})
+                frames, peak = recorder.stop(wav_path=str(wav_path))
+                _write_json({"type": "stopped", "id": req_id, "wav_path": wav_path, "frames": frames, "peak": peak})
                 continue
 
             if msg_type == "cancel":

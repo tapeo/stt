@@ -11,6 +11,7 @@ Built for vibe coding and conversations with AI agents. Supports cloud (Groq API
 - **Auto-type** — transcribed text is typed directly into the active field
 - **Shift+record** — automatically sends Enter after typing (great for chat interfaces)
 - **Audio feedback** — subtle system sounds confirm recording state (can be disabled)
+- **Silence detection** — automatically skips transcription when no speech detected
 - **Slash commands** — say "slash help" to type `/help`
 - **Context prompts** — improve accuracy with domain-specific vocabulary
 - **Auto-updates** — notifies when a new version is available
