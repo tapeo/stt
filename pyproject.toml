@@ -1,6 +1,6 @@
 [project]
 name = "stt"
-version = "0.1.0"
+dynamic = ["version"]
 description = "Speech-to-text for macOS - great for vibe coding and talking to AI agents"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -17,6 +17,7 @@ dependencies = [
     "numba>=0.60.0",
     "parakeet-mlx>=0.5.0",
     "metaphone>=0.6",
+    "packaging>=21.0",
 ]
 
 [project.optional-dependencies]
@@ -26,8 +27,14 @@ parakeet = ["parakeet-mlx"]
 stt = "stt:main"
 
 [build-system]
-requires = ["hatchling"]
+requires = ["hatchling", "hatch-vcs"]
 build-backend = "hatchling.build"
+
+[tool.hatch.version]
+source = "vcs"
+
+[tool.hatch.build.hooks.vcs]
+version-file = "_version.py"
 
 [tool.hatch.build.targets.wheel]
 only-include = ["stt.py", "providers.py", "menubar.py", "mlx_worker.py", "parakeet_worker.py", "audio_worker.py", "postprocess.py", "overlay.py"]

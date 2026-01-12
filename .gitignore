@@ -8,3 +8,4 @@ dist/
 build/
 .python-version
 uv.lock
+_version.py

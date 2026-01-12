@@ -22,8 +22,12 @@ from typing import Any, Callable, Optional
 print("Starting STT...", end="", flush=True)
 
 # Version for update checking
-__version__ = "0.1.0"
-REPO_URL = "https://api.github.com/repos/bokan/stt/commits/master"
+try:
+    from importlib.metadata import version as _get_version
+    __version__ = _get_version("stt")
+except Exception:
+    __version__ = "0.0.0"  # Fallback for dev mode
+RELEASES_URL = "https://api.github.com/repos/bokan/stt/releases/latest"
 
 from dotenv import load_dotenv
 import sounddevice as sd
@@ -47,29 +51,17 @@ class AppState(Enum):
 
 
 def check_for_updates():
-    """Check if a newer version is available on GitHub"""
-    version_file = os.path.join(CONFIG_DIR, ".last_commit")
-
+    """Check if a newer version is available on GitHub releases"""
     try:
-        response = requests.get(REPO_URL, timeout=5)
+        from packaging.version import parse as parse_version
+        response = requests.get(RELEASES_URL, timeout=5)
         if response.status_code == 200:
-            latest_sha = response.json()["sha"][:7]
-
-            # Read stored commit
-            stored_sha = None
-            if os.path.exists(version_file):
-                with open(version_file, "r") as f:
-                    stored_sha = f.read().strip()
-
-            if stored_sha and stored_sha != latest_sha:
-                print(f"\n📦 Update available! Run: uv tool upgrade stt", flush=True)
-
-            # Store current commit
-            os.makedirs(CONFIG_DIR, exist_ok=True)
-            with open(version_file, "w") as f:
-                f.write(latest_sha)
+            latest = response.json()["tag_name"].lstrip("v")
+            if parse_version(latest) > parse_version(__version__):
+                print(f"\n📦 Update available: {__version__} → {latest}", flush=True)
+                print(f"   Run: uv tool install --reinstall git+https://github.com/bokan/stt.git", flush=True)
     except Exception:
-        pass  # Silently fail if offline
+        pass  # Silently fail if offline or no releases
 
 
 def check_accessibility_permissions():
