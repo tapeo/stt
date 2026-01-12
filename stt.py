@@ -139,6 +139,7 @@ SOUND_ENABLED = os.environ.get("SOUND_ENABLED", "true").lower() == "true"
 PROVIDER = os.environ.get("PROVIDER", "mlx")  # "mlx" (local) or "groq" (cloud)
 SAMPLE_RATE = 16000  # Whisper expects 16kHz
 CHANNELS = 1
+SILENCE_THRESHOLD = 0.01  # Skip transcription if peak below this
 
 # Hotkey configuration
 HOTKEYS = {
@@ -585,10 +586,10 @@ class _AudioWorkerClient:
         self._lock = threading.Lock()
         self._next_id = 1
         self._cleanup_registered = False
-        self._waveform_callback: Optional[Callable[[list[float]], None]] = None
+        self._waveform_callback: Optional[Callable[[list[float], float], None]] = None
 
-    def set_waveform_callback(self, callback: Optional[Callable[[list[float]], None]]):
-        """Set callback for waveform updates"""
+    def set_waveform_callback(self, callback: Optional[Callable[[list[float], float], None]]):
+        """Set callback for waveform updates (values, raw_peak)"""
         self._waveform_callback = callback
 
     def is_running(self) -> bool:
@@ -704,7 +705,7 @@ class _AudioWorkerClient:
                 # Handle waveform messages via callback (don't queue)
                 if msg.get("type") == "waveform" and self._waveform_callback:
                     try:
-                        self._waveform_callback(msg.get("values", []))
+                        self._waveform_callback(msg.get("values", []), msg.get("raw_peak", 0.0))
                     except Exception:
                         pass
                 else:
@@ -874,9 +875,10 @@ class STTApp:
         self._watchdog_thread = threading.Thread(target=self._watchdog_loop, daemon=True)
         self._watchdog_thread.start()
 
-    def _on_waveform(self, values: list[float]):
+    def _on_waveform(self, values: list[float], raw_peak: float):
         """Handle waveform data from audio worker"""
-        self._overlay.update_waveform(values)
+        above_threshold = raw_peak >= SILENCE_THRESHOLD
+        self._overlay.update_waveform(values, above_threshold)
 
     def _watchdog_loop(self):
         """Monitor for stuck states and recover if needed"""
@@ -1143,7 +1145,7 @@ class STTApp:
                 print("⚠️  No audio captured, skipping...")
             elif frames < int(SAMPLE_RATE * 0.5):  # Less than 0.5 seconds
                 print("⚠️  Recording too short, skipping...")
-            elif peak < 0.02:  # Silence threshold (no peaks above noise floor)
+            elif peak < SILENCE_THRESHOLD:
                 print("⚠️  Audio too quiet (silence), skipping...")
             else:
                 self._set_state(AppState.TRANSCRIBING)

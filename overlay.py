@@ -46,6 +46,7 @@ class WaveformView(NSView):
             self._transcribing = False
             self._animation_phase = 0.0
             self._shift_held = False
+            self._threshold_crossed = False  # Latches true once above silence threshold
         return self
 
     def setShiftHeld_(self, held):
@@ -83,8 +84,8 @@ class WaveformView(NSView):
             self._animation_phase -= math.pi * 2
         self.setNeedsDisplay_(True)
 
-    def setWaveform_(self, values):
-        """Update waveform values (list of 0.0-1.0)"""
+    def setWaveform_aboveThreshold_(self, values, above_threshold):
+        """Update waveform values (list of 0.0-1.0) and threshold state"""
         if len(values) >= BAR_COUNT:
             self._waveform = values[:BAR_COUNT]
         else:
@@ -96,6 +97,8 @@ class WaveformView(NSView):
             target = self._waveform[i]
             self._smoothed[i] += (target - self._smoothed[i]) * 0.4
 
+        if above_threshold:
+            self._threshold_crossed = True
         self.setNeedsDisplay_(True)
 
     def drawRect_(self, rect):
@@ -122,6 +125,18 @@ class WaveformView(NSView):
         waveform_area_width = bounds.size.width - MIC_AREA_WIDTH
         start_x = MIC_AREA_WIDTH + (waveform_area_width - total_bars_width) / 2
         center_y = bounds.size.height / 2
+
+        # Set bar color based on state
+        if self._transcribing:
+            pass  # Color set per-bar in loop
+        elif self._threshold_crossed:
+            # Bright white once threshold crossed
+            bar_color = NSColor.whiteColor()
+            bar_color.setFill()
+        else:
+            # Dim until threshold crossed
+            bar_color = NSColor.colorWithCalibratedRed_green_blue_alpha_(1, 1, 1, 0.35)
+            bar_color.setFill()
 
         for i in range(BAR_COUNT):
             if self._transcribing:
@@ -309,6 +324,7 @@ class RecordingOverlay:
             if self._view:
                 self._view._smoothed = [0.0] * BAR_COUNT
                 self._view._shift_held = False
+                self._view._threshold_crossed = False
                 self._view.setTranscribing_(False)
             self._window.orderFront_(None)
 
@@ -327,7 +343,7 @@ class RecordingOverlay:
 
         _run_on_main_thread(_hide)
 
-    def update_waveform(self, values: list[float]):
+    def update_waveform(self, values: list[float], above_threshold: bool = False):
         """Update waveform display"""
         with self._lock:
             if not self._visible:
@@ -335,7 +351,7 @@ class RecordingOverlay:
 
         def _update():
             if self._view:
-                self._view.setWaveform_(values)
+                self._view.setWaveform_aboveThreshold_(values, above_threshold)
 
         _run_on_main_thread(_update)
 

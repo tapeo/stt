@@ -124,7 +124,7 @@ class Recorder:
         # Normalize values to 0-1 range based on peak
         values = [min(1.0, v / self._peak_level * 0.85) for v in raw_values]
 
-        _write_json({"type": "waveform", "values": values})
+        _write_json({"type": "waveform", "values": values, "raw_peak": current_max})
 
     def stop(self, *, wav_path: str) -> tuple[int, float]:
         if not self._recording:
