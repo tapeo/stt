@@ -1118,11 +1118,18 @@ def main():
     # Check for updates in background
     threading.Thread(target=check_for_updates, daemon=True).start()
 
-    # Initialize provider
-    try:
-        provider = get_provider(PROVIDER)
-    except ValueError as e:
-        console.print(f"[red]✗[/red] {e}")
+    # Initialize provider (may be slow due to imports)
+    from rich.status import Status
+    provider = None
+    init_error = None
+    with Status("[dim]Initializing...[/dim]", console=console, spinner="dots"):
+        try:
+            provider = get_provider(PROVIDER)
+        except ValueError as e:
+            init_error = e
+
+    if init_error:
+        console.print(f"[red]✗[/red] {init_error}")
         sys.exit(1)
 
     if not provider.is_available():
