@@ -1122,9 +1122,11 @@ def main():
     from rich.status import Status
     provider = None
     init_error = None
+    provider_available = False
     with Status("[dim]Initializing...[/dim]", console=console, spinner="dots"):
         try:
             provider = get_provider(PROVIDER)
+            provider_available = provider.is_available()  # This imports heavy modules
         except ValueError as e:
             init_error = e
 
@@ -1132,7 +1134,7 @@ def main():
         console.print(f"[red]✗[/red] {init_error}")
         sys.exit(1)
 
-    if not provider.is_available():
+    if not provider_available:
         if PROVIDER == "groq" and not GROQ_API_KEY:
             setup_wizard()
             provider = get_provider(PROVIDER)
