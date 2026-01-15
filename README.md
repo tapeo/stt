@@ -4,6 +4,8 @@
 
 Hold a key, speak, release — your words appear wherever your cursor is. Built for vibe coding and conversations with AI agents.
 
+![Demo](demo.gif)
+
 - **Free & open source** — no subscription, no cloud dependency
 - **Runs locally** on Apple Silicon via MLX Whisper or Parakeet
 - **Or use cloud** (Groq) when you prefer
