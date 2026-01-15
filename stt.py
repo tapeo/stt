@@ -19,37 +19,34 @@ import concurrent.futures
 from enum import Enum
 from typing import Any, Callable, Optional
 
-# Show immediate feedback during slow imports
-import sys
-sys.stdout.write("Loading...")
-sys.stdout.flush()
-
 # Suppress multiprocessing semaphore leak warning (benign at exit)
 import warnings
 warnings.filterwarnings("ignore", message="resource_tracker:.*semaphore", category=UserWarning)
 
-# Version for update checking
-try:
-    from importlib.metadata import version as _get_version
-    __version__ = _get_version("stt")
-except Exception:
-    __version__ = "0.0.0"  # Fallback for dev mode
-RELEASES_URL = "https://api.github.com/repos/bokan/stt/releases/latest"
+# Show spinner during slow imports
+from rich.console import Console
+from rich.status import Status
+_console = Console()
+with Status("[dim]Loading...[/dim]", console=_console, spinner="dots"):
+    # Version for update checking
+    try:
+        from importlib.metadata import version as _get_version
+        __version__ = _get_version("stt")
+    except Exception:
+        __version__ = "0.0.0"  # Fallback for dev mode
+    RELEASES_URL = "https://api.github.com/repos/bokan/stt/releases/latest"
 
-from dotenv import load_dotenv
-import sounddevice as sd
-from pynput import keyboard, mouse
-import requests
-from watchdog.observers import Observer
-from watchdog.events import FileSystemEventHandler
+    from dotenv import load_dotenv
+    import sounddevice as sd
+    from pynput import keyboard, mouse
+    import requests
+    from watchdog.observers import Observer
+    from watchdog.events import FileSystemEventHandler
 
-from providers import get_provider
-from menubar import STTMenuBar
-from overlay import get_overlay
-
-# Clear the loading message
-sys.stdout.write("\r\033[K")
-sys.stdout.flush()
+    from providers import get_provider
+    from menubar import STTMenuBar
+    from overlay import get_overlay
+del _console
 
 
 class AppState(Enum):
