@@ -173,6 +173,9 @@ HOTKEY = os.environ.get("HOTKEY", "cmd_r")  # Right Command by default
 PROMPT = os.environ.get("PROMPT", "")  # Context prompt for Whisper
 SOUND_ENABLED = os.environ.get("SOUND_ENABLED", "true").lower() == "true"
 PROVIDER = os.environ.get("PROVIDER", "mlx")  # "mlx" (local) or "groq" (cloud)
+KEEP_RECORDINGS = os.environ.get("KEEP_RECORDINGS", "false").lower() == "true"
+RECORDINGS_DIR = os.path.expanduser("~/.stt-recordings")
+RECORDINGS_MAX_BYTES = 1024 * 1024 * 1024  # 1GB
 SAMPLE_RATE = 16000  # Whisper expects 16kHz
 CHANNELS = 1
 SILENCE_THRESHOLD = 0.01  # Skip transcription if peak below this
@@ -331,6 +334,76 @@ def play_sound(sound_path):
     if not SOUND_ENABLED:
         return
     subprocess.Popen(["afplay", sound_path], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+
+def _enforce_recordings_limit():
+    """Delete oldest recordings if total size exceeds RECORDINGS_MAX_BYTES"""
+    if not os.path.isdir(RECORDINGS_DIR):
+        return
+
+    files = []
+    total_size = 0
+    for name in os.listdir(RECORDINGS_DIR):
+        if not name.endswith(".wav"):
+            continue
+        path = os.path.join(RECORDINGS_DIR, name)
+        try:
+            stat = os.stat(path)
+            files.append((path, stat.st_mtime, stat.st_size))
+            total_size += stat.st_size
+        except OSError:
+            continue
+
+    if total_size <= RECORDINGS_MAX_BYTES:
+        return
+
+    # Sort by mtime ascending (oldest first)
+    files.sort(key=lambda x: x[1])
+
+    for path, _, size in files:
+        if total_size <= RECORDINGS_MAX_BYTES:
+            break
+        try:
+            os.unlink(path)
+            total_size -= size
+            # Also delete accompanying .txt if exists
+            txt_path = path.rsplit(".", 1)[0] + ".txt"
+            try:
+                os.unlink(txt_path)
+            except OSError:
+                pass
+        except OSError:
+            pass
+
+
+def archive_recording(wav_path: str, text: str | None = None) -> str | None:
+    """Move recording to archive dir; returns new path or None on failure"""
+    if not KEEP_RECORDINGS:
+        return None
+
+    os.makedirs(RECORDINGS_DIR, exist_ok=True)
+    timestamp = time.strftime("%Y%m%d_%H%M%S")
+    dest = os.path.join(RECORDINGS_DIR, f"{timestamp}.wav")
+
+    try:
+        shutil.move(wav_path, dest)
+    except Exception:
+        try:
+            shutil.copy2(wav_path, dest)
+        except Exception:
+            return None
+
+    # Optionally save transcription alongside
+    if text:
+        txt_path = os.path.join(RECORDINGS_DIR, f"{timestamp}.txt")
+        try:
+            with open(txt_path, "w", encoding="utf-8") as f:
+                f.write(text)
+        except Exception:
+            pass
+
+    _enforce_recordings_limit()
+    return dest
 
 
 def save_config(key, value, force_global=False):
@@ -1017,55 +1090,64 @@ class STTApp:
         self._overlay.hide()
         self._set_state(AppState.IDLE)
 
-    def transcribe_audio(self, audio_file_path, timeout_s: int | None = None):
-        """Transcribe audio using the configured provider with timeout protection"""
+    def transcribe_audio(self, audio_file_path, timeout_s: int | None = None, max_retries: int = 2):
+        """Transcribe audio using the configured provider with timeout protection and retries"""
         if timeout_s is None:
             env_timeout = os.environ.get("STT_TRANSCRIBE_TIMEOUT_S")
             if env_timeout:
                 try:
                     timeout_s = max(1, int(env_timeout))
                 except ValueError:
-                    timeout_s = 7
+                    timeout_s = 5
             else:
-                timeout_s = 7
+                timeout_s = 5
 
-        result_queue: "queue.Queue[tuple[str, object]]" = queue.Queue(maxsize=1)
+        for attempt in range(max_retries + 1):
+            result_queue: "queue.Queue[tuple[str, object]]" = queue.Queue(maxsize=1)
 
-        def _run_transcribe() -> None:
+            def _run_transcribe() -> None:
+                try:
+                    result = self.provider.transcribe(audio_file_path, LANGUAGE, PROMPT)
+                    result_queue.put(("ok", result))
+                except Exception as e:
+                    result_queue.put(("err", e))
+
+            thread = threading.Thread(target=_run_transcribe, daemon=True)
+            thread.start()
+
             try:
-                result = self.provider.transcribe(audio_file_path, LANGUAGE, PROMPT)
-                result_queue.put(("ok", result))
-            except Exception as e:
-                result_queue.put(("err", e))
+                status, payload = result_queue.get(timeout=timeout_s)
+            except queue.Empty:
+                self._log_event(f"app_timeout_attempt_{attempt + 1}")
+                # Try to cancel the provider
+                cancel = getattr(self.provider, "cancel", None)
+                if callable(cancel):
+                    try:
+                        cancel()
+                    except Exception:
+                        pass
+                if attempt < max_retries:
+                    print(f"⚠️  Transcription timed out, retrying ({attempt + 2}/{max_retries + 1})...")
+                    continue
+                print("❌ Transcription timed out after all retries")
+                if hasattr(self.provider, "_last_error"):
+                    try:
+                        self.provider._last_error = "app_timeout"
+                        self.provider._last_error_trace = None
+                    except Exception:
+                        pass
+                return None
 
-        thread = threading.Thread(target=_run_transcribe, daemon=True)
-        thread.start()
+            if status == "err":
+                if attempt < max_retries:
+                    print(f"⚠️  Transcription failed, retrying ({attempt + 2}/{max_retries + 1})...")
+                    continue
+                print(f"❌ Transcription error after all retries: {payload}")
+                return None
 
-        try:
-            status, payload = result_queue.get(timeout=timeout_s)
-        except queue.Empty:
-            print("❌ Transcription timed out at STTApp level")
-            self._log_event("app_timeout")
-            # Try to cancel the provider if it supports cancellation
-            if hasattr(self.provider, "_last_error"):
-                try:
-                    self.provider._last_error = "app_timeout"
-                    self.provider._last_error_trace = None
-                except Exception:
-                    pass
-            cancel = getattr(self.provider, "cancel", None)
-            if callable(cancel):
-                try:
-                    cancel()
-                except Exception:
-                    pass
-            return None
+            return payload  # type: ignore[return-value]
 
-        if status == "err":
-            print(f"❌ Transcription error: {payload}")
-            return None
-
-        return payload  # type: ignore[return-value]
+        return None
 
     def print_ready_prompt(self):
         """Print the ready prompt with hotkey name"""
@@ -1143,6 +1225,7 @@ class STTApp:
             self._processing_since = time.time()
 
         wav_path = None
+        transcribed_text = None
         try:
             wav_path, frames, peak = self.stop_recording()
 
@@ -1158,6 +1241,7 @@ class STTApp:
 
                 if text:
                     text = self.transform_text(text)
+                    transcribed_text = text
                     self.type_text(text, send_enter=send_enter)
                     print(f"✓ {text}")
                 else:
@@ -1169,12 +1253,14 @@ class STTApp:
         except Exception as e:
             print(f"❌ Error processing recording: {e}")
         finally:
-            # Always clean up temp file if created
+            # Archive or clean up temp file
             if wav_path:
-                try:
-                    os.unlink(wav_path)
-                except OSError:
-                    pass
+                archived = archive_recording(wav_path, transcribed_text)
+                if not archived:
+                    try:
+                        os.unlink(wav_path)
+                    except OSError:
+                        pass
             with self._lock:
                 self._processing = False
                 self._operation_start_time = None
