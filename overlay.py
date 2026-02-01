@@ -26,13 +26,13 @@ from Foundation import NSRect, NSPoint, NSSize, NSMakeRect, NSPointInRect
 # Overlay dimensions
 PILL_WIDTH = 280
 PILL_HEIGHT = 60
-BAR_COUNT = 24
-BAR_WIDTH = 6
-BAR_GAP = 2
+BAR_COUNT = 20
+BAR_WIDTH = 5
+BAR_GAP = 4
 BAR_MAX_HEIGHT = 40
 BAR_MIN_HEIGHT = 4
 CORNER_RADIUS = PILL_HEIGHT / 2
-MIC_AREA_WIDTH = 50  # Space for mic icon on left
+MIC_AREA_WIDTH = 52  # Space for mic icon on left (with padding)
 
 
 class WaveformView(NSView):
@@ -105,14 +105,29 @@ class WaveformView(NSView):
         """Draw the pill background, mic icon, and waveform bars"""
         bounds = self.bounds()
 
+        # Inset slightly for crisp stroke
+        inset = 0.5
+        pill_rect = NSMakeRect(
+            bounds.origin.x + inset,
+            bounds.origin.y + inset,
+            bounds.size.width - 2 * inset,
+            bounds.size.height - 2 * inset
+        )
+
         # Draw pill background
-        bg_color = NSColor.colorWithCalibratedRed_green_blue_alpha_(0, 0, 0, 0.7)
+        bg_color = NSColor.colorWithCalibratedRed_green_blue_alpha_(0.05, 0.05, 0.05, 0.85)
         bg_color.setFill()
 
         pill_path = NSBezierPath.bezierPathWithRoundedRect_xRadius_yRadius_(
-            bounds, CORNER_RADIUS, CORNER_RADIUS
+            pill_rect, CORNER_RADIUS - inset, CORNER_RADIUS - inset
         )
         pill_path.fill()
+
+        # Subtle border for crisp edge
+        stroke_color = NSColor.colorWithCalibratedRed_green_blue_alpha_(1, 1, 1, 0.08)
+        stroke_color.setStroke()
+        pill_path.setLineWidth_(0.5)
+        pill_path.stroke()
 
         # Draw microphone icon
         bar_color = NSColor.whiteColor()
@@ -122,8 +137,10 @@ class WaveformView(NSView):
         # Draw waveform bars (shifted right for mic icon)
         import math
         total_bars_width = BAR_COUNT * BAR_WIDTH + (BAR_COUNT - 1) * BAR_GAP
-        waveform_area_width = bounds.size.width - MIC_AREA_WIDTH
-        start_x = MIC_AREA_WIDTH + (waveform_area_width - total_bars_width) / 2
+        # Center bars between mic area and right edge (with padding for corner)
+        right_padding = 16
+        available_width = bounds.size.width - MIC_AREA_WIDTH - right_padding
+        start_x = MIC_AREA_WIDTH + (available_width - total_bars_width) / 2
         center_y = bounds.size.height / 2
 
         # Set bar color based on state
@@ -163,16 +180,17 @@ class WaveformView(NSView):
 
     def _draw_mic_icon(self, bounds):
         """Draw microphone icon (and enter icon if shift held) using SF Symbols"""
-        from AppKit import NSImageSymbolConfiguration
+        from AppKit import NSImageSymbolConfiguration, NSFontWeightRegular
 
-        config = NSImageSymbolConfiguration.configurationWithPointSize_weight_(24, 5)
+        # NSFontWeightRegular = 0.0, 28pt
+        config = NSImageSymbolConfiguration.configurationWithPointSize_weight_(28, NSFontWeightRegular)
         color_config = NSImageSymbolConfiguration.configurationWithHierarchicalColor_(
             NSColor.whiteColor()
         )
         combined = config.configurationByApplyingConfiguration_(color_config)
 
         mic_image = NSImage.imageWithSystemSymbolName_accessibilityDescription_(
-            "mic.fill", "Recording"
+            "mic", "Recording"
         )
         if not mic_image:
             return
@@ -226,7 +244,8 @@ class WaveformView(NSView):
             draw_width = img_size.width * scale
             draw_height = img_size.height * scale
 
-            center_x = MIC_AREA_WIDTH / 2 + 12
+            # Center icon in mic area with left padding for pill corner
+            center_x = 14 + (MIC_AREA_WIDTH - 14) / 2
             icon_rect = NSMakeRect(
                 center_x - draw_width / 2,
                 center_y - draw_height / 2,
