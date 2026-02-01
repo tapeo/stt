@@ -17,9 +17,16 @@ import traceback
 from typing import Any
 
 
+_STDOUT_LOCK = threading.Lock()
+
+
 def _write_json(message: dict[str, Any]) -> None:
-    sys.stdout.write(json.dumps(message, ensure_ascii=False) + "\n")
-    sys.stdout.flush()
+    data = (json.dumps(message, ensure_ascii=False) + "\n").encode("utf-8")
+    try:
+        with _STDOUT_LOCK:
+            os.write(sys.stdout.fileno(), data)
+    except BrokenPipeError:
+        os._exit(0)
 
 
 def _log(message: str) -> None:

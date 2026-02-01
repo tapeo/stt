@@ -632,10 +632,41 @@ class _AudioWorkerClient:
         self._next_id = 1
         self._cleanup_registered = False
         self._waveform_callback: Optional[Callable[[list[float], float], None]] = None
+        self._waveform_q: "queue.Queue[tuple[list[float], float]]" = queue.Queue(maxsize=1)
+        self._waveform_dispatch_thread = threading.Thread(
+            target=self._waveform_dispatch_loop, daemon=True
+        )
+        self._waveform_dispatch_thread.start()
 
     def set_waveform_callback(self, callback: Optional[Callable[[list[float], float], None]]):
         """Set callback for waveform updates (values, raw_peak)"""
         self._waveform_callback = callback
+
+    def _enqueue_waveform(self, values: list[float], raw_peak: float) -> None:
+        if not self._waveform_callback:
+            return
+        try:
+            self._waveform_q.put_nowait((values, raw_peak))
+        except queue.Full:
+            try:
+                _ = self._waveform_q.get_nowait()
+            except queue.Empty:
+                pass
+            try:
+                self._waveform_q.put_nowait((values, raw_peak))
+            except queue.Full:
+                pass
+
+    def _waveform_dispatch_loop(self) -> None:
+        while True:
+            values, raw_peak = self._waveform_q.get()
+            cb = self._waveform_callback
+            if not cb:
+                continue
+            try:
+                cb(values, raw_peak)
+            except Exception:
+                pass
 
     def is_running(self) -> bool:
         return self._proc is not None and self._proc.poll() is None
@@ -753,12 +784,8 @@ class _AudioWorkerClient:
                 continue
             try:
                 msg = json.loads(line)
-                # Handle waveform messages via callback (don't queue)
-                if msg.get("type") == "waveform" and self._waveform_callback:
-                    try:
-                        self._waveform_callback(msg.get("values", []), msg.get("raw_peak", 0.0))
-                    except Exception:
-                        pass
+                if msg.get("type") == "waveform":
+                    self._enqueue_waveform(msg.get("values", []), float(msg.get("raw_peak", 0.0) or 0.0))
                 else:
                     messages.put(msg)
             except json.JSONDecodeError:
@@ -1057,7 +1084,7 @@ class STTApp:
             self.recording = True
             self._operation_start_time = time.time()
             self._starting_since = self._operation_start_time
-            self._last_waveform_ts = None
+            self._last_waveform_ts = self._operation_start_time
             self._log_event("start_recording")
 
         self._set_state(AppState.RECORDING)
@@ -1128,7 +1155,13 @@ class STTApp:
             print("❌ Audio recording stop timed out. Restarting audio worker...")
             self._audio_worker.stop(force=True)
             try:
-                os.unlink(wav_path)
+                if os.path.exists(wav_path) and os.path.getsize(wav_path) > 0:
+                    archived = archive_recording(wav_path, None)
+                    if not archived:
+                        print(f"⚠️  Kept timed-out wav for debugging: {wav_path}")
+                        return wav_path, 0, 0.0
+                else:
+                    os.unlink(wav_path)
             except OSError:
                 pass
             return None, 0, 0.0
