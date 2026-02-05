@@ -24,6 +24,8 @@ HOTKEYS: dict[str, dict[str, object]] = {
 }
 
 SIDE_BUTTON_SUPPRESSION_WINDOW_SECONDS = 0.2
+SIDE_BUTTON_X1_VALUE = 4
+SIDE_BUTTON_X2_VALUE = 5
 
 
 VK_TO_CHAR: dict[int, str] = {
@@ -309,7 +311,7 @@ class InputController:
             is_side_button = button in (mouse.Button.x1, mouse.Button.x2)
         else:
             button_value = getattr(button, "value", button)
-            is_side_button = button_value in (4, 5)
+            is_side_button = button_value in (SIDE_BUTTON_X1_VALUE, SIDE_BUTTON_X2_VALUE)
         if is_side_button:
             with self._lock:
                 self._side_button_pressed = pressed
