@@ -240,7 +240,7 @@ def main() -> None:
 
     console = Console()
     console.print()
-    console.print("[bold]STT[/bold] [dim]Voice-to-text for macOS[/dim]")
+    console.print(f"[bold]STT[/bold] [dim]Voice-to-text for macOS - {__version__}[/dim]")
     console.print("[dim]https://github.com/bokan/stt[/dim]")
     console.print()
 
