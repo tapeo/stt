@@ -81,6 +81,8 @@ class InputController:
         self._trigger_is_shift = False
         self._trigger_is_alt = False
         self._trigger_flag_mask = None
+        self._flag_state_fn = None
+        self._flag_state_source = None
         self._trigger_key_name = "Right ⌘"
 
         self._prompt_overlay = PromptOverlay(on_select=self._on_prompt_select)
@@ -114,12 +116,16 @@ class InputController:
             self._trigger_is_alt = self._trigger_key in (keyboard.Key.alt_l, keyboard.Key.alt_r)
 
             self._trigger_flag_mask = None
+            self._flag_state_fn = None
+            self._flag_state_source = None
             try:
                 from Quartz import (
+                    CGEventSourceFlagsState,
                     kCGEventFlagMaskCommand,
                     kCGEventFlagMaskShift,
                     kCGEventFlagMaskAlternate,
                     kCGEventFlagMaskControl,
+                    kCGEventSourceStateHIDSystemState,
                 )
 
                 if self._trigger_key in (keyboard.Key.cmd, keyboard.Key.cmd_l, keyboard.Key.cmd_r):
@@ -130,8 +136,12 @@ class InputController:
                     self._trigger_flag_mask = kCGEventFlagMaskAlternate
                 elif self._trigger_key in (keyboard.Key.ctrl_l, keyboard.Key.ctrl_r):
                     self._trigger_flag_mask = kCGEventFlagMaskControl
+                self._flag_state_fn = CGEventSourceFlagsState
+                self._flag_state_source = kCGEventSourceStateHIDSystemState
             except Exception:
                 self._trigger_flag_mask = None
+                self._flag_state_fn = None
+                self._flag_state_source = None
 
     def start(self) -> None:
         self._listener.start()
@@ -162,14 +172,26 @@ class InputController:
 
         threading.Thread(target=do_paste, daemon=True).start()
 
+    def _modifier_flag_active(self, flag_mask: int | None) -> bool:
+        """Return True if flag_mask is active or when flag_mask/state is unavailable."""
+        flag_state_fn = self._flag_state_fn
+        flag_state_source = self._flag_state_source
+        if flag_mask is None or flag_state_fn is None or flag_state_source is None:
+            return True
+        return bool(flag_state_fn(flag_state_source) & flag_mask)
+
     def _on_press(self, key):
         try:
             with self._lock:
                 trigger_key = self._trigger_key
                 trigger_is_shift = self._trigger_is_shift
                 trigger_is_alt = self._trigger_is_alt
+                trigger_flag_mask = self._trigger_flag_mask
 
             if key == trigger_key:
+                # Ignore spurious modifier events (e.g., mouse side buttons).
+                if not self._modifier_flag_active(trigger_flag_mask):
+                    return
                 with self._lock:
                     if self._key_pressed and not self._app.recording and not self._app._starting:
                         self._key_pressed = False
