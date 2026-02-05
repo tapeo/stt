@@ -285,7 +285,7 @@ class InputController:
                 if not trigger_is_alt:
                     return
 
-            is_cmd_trigger = trigger_key in (keyboard.Key.cmd_l, keyboard.Key.cmd_r)
+            is_cmd_trigger = trigger_key in (keyboard.Key.cmd, keyboard.Key.cmd_l, keyboard.Key.cmd_r)
             if key == trigger_key or (is_cmd_trigger and key == keyboard.Key.cmd):
                 with self._lock:
                     if not self._key_pressed:
@@ -305,14 +305,17 @@ class InputController:
                 self._record_source = None
 
     def _on_click(self, x, y, button, pressed):
-        button_value = getattr(button, "value", button)
-        if button in (mouse.Button.x1, mouse.Button.x2) or button_value in (4, 5):
+        if hasattr(mouse.Button, "x1") and hasattr(mouse.Button, "x2"):
+            is_side_button = button in (mouse.Button.x1, mouse.Button.x2)
+        else:
+            button_value = getattr(button, "value", button)
+            is_side_button = button_value in (4, 5)
+        if is_side_button:
             with self._lock:
                 self._side_button_pressed = pressed
                 if pressed:
                     self._ignore_hotkey_until = time.monotonic() + SIDE_BUTTON_SUPPRESSION_WINDOW_SECONDS
             return
-        return
 
     def _start_release_fallback(self) -> None:
         if self._fallback_thread and self._fallback_thread.is_alive():
