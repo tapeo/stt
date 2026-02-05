@@ -497,7 +497,7 @@ class MLXWhisperProvider(TranscriptionProvider):
 
     DEFAULT_MODEL = "mlx-community/whisper-large-v3-mlx"
     _WORKER_STARTUP_TIMEOUT_S = 1800
-    _TRANSCRIBE_TIMEOUT_S = 6
+    _TRANSCRIBE_TIMEOUT_S = 30
 
     def __init__(self, model: str = None):
         self.model = model or os.environ.get("WHISPER_MODEL", self.DEFAULT_MODEL)
