@@ -72,6 +72,8 @@ class InputController:
         self._lock = threading.Lock()
         self._key_pressed = False
         self._mouse_pressed = False
+        self._side_button_pressed = False
+        self._ignore_hotkey_until = 0.0
         self._record_source: Optional[str] = None
         self._shift_held = False
         self._send_enter_flag = False
@@ -187,8 +189,12 @@ class InputController:
                 trigger_is_shift = self._trigger_is_shift
                 trigger_is_alt = self._trigger_is_alt
                 trigger_flag_mask = self._trigger_flag_mask
+                side_button_pressed = self._side_button_pressed
+                ignore_hotkey_until = self._ignore_hotkey_until
 
             if key == trigger_key:
+                if side_button_pressed or time.monotonic() < ignore_hotkey_until:
+                    return
                 # Ignore spurious modifier events (e.g., mouse side buttons).
                 if not self._modifier_flag_active(trigger_flag_mask):
                     return
@@ -297,6 +303,11 @@ class InputController:
                 self._record_source = None
 
     def _on_click(self, x, y, button, pressed):
+        if button in (mouse.Button.x1, mouse.Button.x2):
+            with self._lock:
+                self._side_button_pressed = pressed
+                self._ignore_hotkey_until = time.monotonic() + 0.2
+            return
         if button != mouse.Button.middle:
             return
 
@@ -351,4 +362,3 @@ class InputController:
 
         self._fallback_thread = threading.Thread(target=loop, daemon=True)
         self._fallback_thread.start()
-
