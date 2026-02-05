@@ -23,7 +23,7 @@ HOTKEYS: dict[str, dict[str, object]] = {
     "shift_l": {"key": keyboard.Key.shift_l, "name": "Left ⇧"},
 }
 
-SIDE_BUTTON_SUPPRESSION_SECONDS = 0.2
+SIDE_BUTTON_SUPPRESSION_WINDOW_SECONDS = 0.2
 
 
 VK_TO_CHAR: dict[int, str] = {
@@ -75,6 +75,7 @@ class InputController:
         self._key_pressed = False
         self._mouse_pressed = False
         self._side_button_pressed = False
+        # Monotonic timestamp until which hotkey presses are ignored.
         self._ignore_hotkey_until = 0.0
         self._record_source: Optional[str] = None
         self._shift_held = False
@@ -284,9 +285,8 @@ class InputController:
                 if not trigger_is_alt:
                     return
 
-            is_cmd_trigger = trigger_key in (keyboard.Key.cmd, keyboard.Key.cmd_l, keyboard.Key.cmd_r)
-            is_cmd_release = key in (keyboard.Key.cmd, keyboard.Key.cmd_l, keyboard.Key.cmd_r)
-            if key == trigger_key or (is_cmd_trigger and is_cmd_release):
+            is_cmd_trigger = trigger_key in (keyboard.Key.cmd_l, keyboard.Key.cmd_r)
+            if key == trigger_key or (is_cmd_trigger and key == keyboard.Key.cmd):
                 with self._lock:
                     if not self._key_pressed:
                         return
@@ -305,30 +305,14 @@ class InputController:
                 self._record_source = None
 
     def _on_click(self, x, y, button, pressed):
-        if button in (mouse.Button.x1, mouse.Button.x2):
+        button_value = getattr(button, "value", button)
+        if button in (mouse.Button.x1, mouse.Button.x2) or button_value in (4, 5):
             with self._lock:
                 self._side_button_pressed = pressed
                 if pressed:
-                    self._ignore_hotkey_until = time.monotonic() + SIDE_BUTTON_SUPPRESSION_SECONDS
+                    self._ignore_hotkey_until = time.monotonic() + SIDE_BUTTON_SUPPRESSION_WINDOW_SECONDS
             return
-        if button != mouse.Button.middle:
-            return
-
-        if pressed:
-            with self._lock:
-                if self._mouse_pressed and not self._app.recording and not self._app._starting:
-                    self._mouse_pressed = False
-                if not self._mouse_pressed:
-                    self._mouse_pressed = True
-                    self._record_source = "mouse"
-                    threading.Thread(target=self._app.start_recording, daemon=True).start()
-        else:
-            with self._lock:
-                if not self._mouse_pressed:
-                    return
-                self._mouse_pressed = False
-                self._record_source = None
-            threading.Thread(target=self._app.process_recording, args=(True,), daemon=True).start()
+        return
 
     def _start_release_fallback(self) -> None:
         if self._fallback_thread and self._fallback_thread.is_alive():
