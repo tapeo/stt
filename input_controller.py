@@ -23,6 +23,8 @@ HOTKEYS: dict[str, dict[str, object]] = {
     "shift_l": {"key": keyboard.Key.shift_l, "name": "Left ⇧"},
 }
 
+SIDE_BUTTON_SUPPRESSION_SECONDS = 0.2
+
 
 VK_TO_CHAR: dict[int, str] = {
     18: "1",
@@ -306,7 +308,8 @@ class InputController:
         if button in (mouse.Button.x1, mouse.Button.x2):
             with self._lock:
                 self._side_button_pressed = pressed
-                self._ignore_hotkey_until = time.monotonic() + 0.2
+                if pressed:
+                    self._ignore_hotkey_until = time.monotonic() + SIDE_BUTTON_SUPPRESSION_SECONDS
             return
         if button != mouse.Button.middle:
             return
