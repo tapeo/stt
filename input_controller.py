@@ -162,14 +162,26 @@ class InputController:
 
         threading.Thread(target=do_paste, daemon=True).start()
 
+    def _modifier_flag_active(self, flag_mask: int | None) -> bool:
+        if flag_mask is None:
+            return True
+        try:
+            from Quartz import CGEventSourceFlagsState, kCGEventSourceStateHIDSystemState
+        except Exception:
+            return True
+        return bool(CGEventSourceFlagsState(kCGEventSourceStateHIDSystemState) & flag_mask)
+
     def _on_press(self, key):
         try:
             with self._lock:
                 trigger_key = self._trigger_key
                 trigger_is_shift = self._trigger_is_shift
                 trigger_is_alt = self._trigger_is_alt
+                trigger_flag_mask = self._trigger_flag_mask
 
             if key == trigger_key:
+                if not self._modifier_flag_active(trigger_flag_mask):
+                    return
                 with self._lock:
                     if self._key_pressed and not self._app.recording and not self._app._starting:
                         self._key_pressed = False
