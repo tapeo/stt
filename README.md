@@ -97,7 +97,7 @@ SOUND_ENABLED=true
 
 ## Prompt Overlay (Optional)
 
-STT includes a prompt overlay for quickly pasting common prompts. It is currently disabled by default.
+STT includes a prompt overlay for quickly pasting common prompts, but it is currently disabled by default and has no hotkey.
 
 Prompts live in:
 
