@@ -243,14 +243,6 @@ class InputController:
                     threading.Thread(target=self._app.cancel_transcription, daemon=True).start()
                 return
 
-            # Prompt overlay (Right Option) unless Option is the trigger key.
-            if key == keyboard.Key.alt_r and not trigger_is_alt:
-                with self._lock:
-                    if not self._prompt_overlay_active:
-                        self._prompt_overlay_active = True
-                        self._prompt_overlay.show()
-                return
-
             with self._lock:
                 prompt_overlay_active = self._prompt_overlay_active
             if prompt_overlay_active and hasattr(key, "vk") and key.vk is not None:
